@@ -1,5 +1,7 @@
 {
-  "chrome_path": "/path/to/chrome",
+  "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "delay_min": 0.03,
-  "delay_max": 0.27
+  "delay_max": 0.37,
+  "pause_min": 0.2,
+  "pause_max": 1.2
 }

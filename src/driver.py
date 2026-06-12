@@ -1,8 +1,10 @@
 import json
+import os
+import signal
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-from src.logger import success, error
+from src.logger import success, error, warning
 
 def load_config(path="config.json") -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -12,11 +14,14 @@ def _build_options(config: dict) -> Options:
     options = Options()
     if config.get("chrome_path"):
         options.binary_location = config["chrome_path"]
+    options.add_argument("--start-maximized")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+    # Detach tells Chrome to keep running after chromedriver exits
+    options.add_experimental_option("detach", True)
     return options
 
 def _patch_webdriver(driver: webdriver.Chrome) -> webdriver.Chrome:
@@ -32,3 +37,26 @@ def create_driver(config: dict) -> webdriver.Chrome:
     except Exception as e:
         error("driver", f"Selenium Manager failed: {e}")
         return None
+
+# Terminate chromedriver only, Chrome keeps running
+def detach_driver(driver: webdriver.Chrome):
+    try:
+        driver.service.process.terminate()
+        success("driver", "ChromeDriver stopped (browser left open)")
+    except Exception as e:
+        warning("driver", f"Could not detach cleanly: {e}")
+
+# Close the browser entirely, killing the process if quit() hangs
+def quit_driver(driver: webdriver.Chrome):
+    browser_pid = driver.service.process.pid if driver.service.process else None
+    try:
+        driver.quit()
+        success("driver", "Browser closed")
+    except Exception:
+        warning("driver", "driver.quit() failed, killing process directly...")
+        if browser_pid:
+            try:
+                os.kill(browser_pid, signal.SIGTERM)
+                success("driver", "Browser process killed")
+            except Exception as e:
+                error("driver", f"Failed to kill browser process: {e}")

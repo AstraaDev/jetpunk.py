@@ -1,0 +1,5 @@
+{
+  "chrome_path": "/path/to/chrome",
+  "delay_min": 0.03,
+  "delay_max": 0.27
+}

@@ -1,4 +1,5 @@
 import sys
+import random
 import argparse
 
 from src.driver import load_config, create_driver, detach_driver, quit_driver
@@ -10,11 +11,24 @@ from src.logger import info, success, warning, error, note
 def main():
     parser = argparse.ArgumentParser(description="Automated JetPunk quiz solver using Selenium for DOM extraction and browser control")
     parser.add_argument("--url", help="URL of the JetPunk quiz to play")
-    parser.add_argument("--refresh", action="store_true", help="Force re-fetch answers even if already cached")
-    parser.add_argument("--list", action="store_true", help="List all cached quizzes")
-    parser.add_argument("--login", action="store_true", default=False, help="Log in before starting the quiz")
-    parser.add_argument("--time", type=float, metavar="SECONDS", help="Target completion time in seconds (overrides config delays)")
+    parser.add_argument("--refresh", action="store_true", help="Force re-fetch answers even if already cached (requires --url)")
+    parser.add_argument("--list", action="store_true", help="List all cached quizzes (cannot be combined with --url)")
+    parser.add_argument("--login", action="store_true", default=False, help="Log in before starting the quiz (requires --url)")
+    parser.add_argument("--shuffle", action="store_true", default=False, help="Randomize answer order before typing (requires --url)")
+    parser.add_argument("--time", type=float, metavar="SECONDS", help="Target completion time in seconds (requires --url)")
     args = parser.parse_args()
+
+    # --list and --url are mutually exclusive
+    if args.list and args.url:
+        error("main", "--list cannot be combined with --url")
+        sys.exit(1)
+
+    # --time, --login, --refresh, --shuffle require --url
+    url_only_flags = {"--refresh": args.refresh, "--login": args.login, "--shuffle": args.shuffle, "--time": args.time}
+    for flag, value in url_only_flags.items():
+        if value and not args.url:
+            error("main", f"{flag} requires --url")
+            sys.exit(1)
 
     # Load config first
     try:
@@ -29,12 +43,18 @@ def main():
         if not data:
             warning("main", "No cached quizzes yet")
         else:
-            print(f"{'Slug':<40} {'Title':<40} {'Answers':>8}")
-            print("-" * 92)
+            note("main", f"{len(data)} cached quiz(zes):")
+            col_slug = 38
+            col_title = 38
+            col_n = 7
+            header = f"  {'Slug':<{col_slug}}  {'Title':<{col_title}}  {'Answers':>{col_n}}"
+            sep = f"  {'-' * col_slug}  {'-' * col_title}  {'-' * col_n}"
+            print(header)
+            print(sep)
             for slug, inf in data.items():
-                title = inf.get("title", "?")[:38]
+                title = inf.get("title", "?")[:col_title]
                 n = len(inf.get("answers", []))
-                print(f"{slug:<40} {title:<40} {n:>8}")
+                print(f"  {slug:<{col_slug}}  {title:<{col_title}}  {n:>{col_n}}")
         return
 
     # Validate URL
@@ -73,12 +93,17 @@ def main():
             error("main", "No answers found. The parser may need adjusting for this quiz type")
             sys.exit(1)
 
-        n_answers = len(quiz_data["answers"])
+        answers = list(quiz_data["answers"])
+        if args.shuffle:
+            random.shuffle(answers)
+            info("main", "Answer order shuffled")
+
+        n_answers = len(answers)
         info("main", f"Playing '{quiz_data.get('title', slug)}' with {n_answers} answers")
 
         # Recalculate delays if --time is set, otherwise use config values
         if args.time:
-            effective_config = compute_delays(config, args.time, quiz_data["answers"])
+            effective_config = compute_delays(config, args.time, answers)
             if effective_config is None:
                 overhead = config["advanced"]["selenium_overhead"]
                 min_time = overhead * n_answers
@@ -91,17 +116,15 @@ def main():
 
         note("main", "Press Enter at any time to stop gracefully")
 
-        completed = play_quiz(driver, url, quiz_data["answers"], effective_config, credentials)
+        completed = play_quiz(driver, url, answers, effective_config, credentials)
 
     except KeyboardInterrupt:
         warning("main", "Interrupted - stopping...")
 
     finally:
         if completed:
-            # Quiz finished normally: leave the browser open
             detach_driver(driver)
         else:
-            # Interrupted or error: close the browser
             quit_driver(driver)
 
 if __name__ == "__main__":

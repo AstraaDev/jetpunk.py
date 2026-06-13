@@ -34,7 +34,9 @@ Configure `config.json`:
   },
   "advanced": {
     "answers_file": "answers.json",
-    "selenium_overhead": 0.36
+    "selenium_overhead": 0.36,
+    "login_api": "https://www.jetpunk.com/api/login.php",
+    "login_referer": "https://www.jetpunk.com/user/login?language=english"
   }
 }
 ```
@@ -60,18 +62,47 @@ python main.py [OPTIONS]
 
 ### Options
 
-| Option           | Description                            |
-| ---------------- | -------------------------------------- |
-| `--url URL`      | Quiz URL                               |
-| `--refresh`      | Refresh cached answers before starting |
-| `--list`         | List cached quizzes                    |
-| `--login`        | Log in before launching the quiz       |
-| `--shuffle`      | Randomize answer order                 |
-| `--time SECONDS` | Target completion time                 |
+| Option           | Description                                                              |
+| ---------------- | ------------------------------------------------------------------------ |
+| `--url URL`      | Quiz URL (required for all operations except `--list`)                   |
+| `--scrape`       | Scrape and cache answers for the quiz, then exit (requires `--url`)      |
+| `--refresh`      | Reset the cached answer pool instead of merging (requires `--scrape`)    |
+| `--list`         | List all cached quizzes                                                  |
+| `--login`        | Log in before launching the quiz (requires `--url`)                      |
+| `--shuffle`      | Randomize answer order before typing (requires `--url`)                  |
+| `--time SECONDS` | Target completion time in seconds (requires `--url`)                     |
+
+---
+
+## Workflow
+
+Answers must be scraped and cached before playing. For standard quizzes a single
+`--scrape` run is enough. For quizzes that show a random subset of questions each
+time (e.g. flag quizzes), run `--scrape` several times to accumulate the full pool.
+
+```
+--scrape          Fetch answers → merge into cache → exit
+--scrape --refresh  Reset cache, fetch fresh answers → exit
+--url             Play using the cached answers (error if none found)
+```
 
 ---
 
 ## Examples
+
+### Scrape a standard quiz
+
+```bash
+python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --scrape
+```
+
+### Accumulate answers for a random-subset quiz (run multiple times)
+
+```bash
+python main.py --url https://www.jetpunk.com/user-quizzes/176412/pays-aleatoire-par-drapeau --scrape
+python main.py --url https://www.jetpunk.com/user-quizzes/176412/pays-aleatoire-par-drapeau --scrape
+# repeat until the pool is complete enough
+```
 
 ### Play a quiz
 
@@ -79,16 +110,22 @@ python main.py [OPTIONS]
 python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name
 ```
 
-### Refresh answers and play
+### Play with a shuffled order and a target time of 4 minutes
 
 ```bash
-python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --refresh
+python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --shuffle --time 240
 ```
 
-### Log in and simulate a 4-minute completion
+### Log in and play
 
 ```bash
-python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --login --time 240 --shuffle
+python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --login
+```
+
+### Reset the cache for a quiz and re-scrape
+
+```bash
+python main.py --url https://www.jetpunk.com/quizzes/how-many-countries-can-you-name --scrape --refresh
 ```
 
 ### List cached quizzes

@@ -9,6 +9,10 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from src.logger import info, success, warning, error, note
 
+# Raised when the quiz type/layout cannot be parsed
+class UnsupportedQuizError(Exception):
+    pass
+
 def load_answers(config: dict) -> dict:
     path = config["advanced"]["answers_file"]
     try:
@@ -82,15 +86,56 @@ def _scrape_answers(driver: webdriver.Chrome) -> list[str]:
 
     return unique
 
+# Scrape the answer list for image quizzes
+def _scrape_image_answers(driver: webdriver.Chrome) -> dict:
+    grid = driver.find_element(By.ID, "photo-grid")
+
+    photo_holders = grid.find_elements(By.CSS_SELECTOR, "div.photo-holder")
+    answers = {}
+
+    for holder in photo_holders:
+        holder_class = holder.get_attribute("class")
+        # Extract the ID from "scroll-target-..."
+        target_id = next((c.replace("scroll-target-", "") for c in holder_class.split() if c.startswith("scroll-target-")), None)
+        if not target_id:
+            continue
+
+        img_src = holder.find_element(By.TAG_NAME, "img").get_attribute("src")
+        answer_el = grid.find_element(By.CSS_SELECTOR, f"div.answer-display.answer-{target_id}")
+        answers[img_src] = answer_el.text.strip()
+
+    return answers
+
+
+# Detect quiz type from the "similar quizzes by tag" box
+def _detect_quiz_type(driver: webdriver.Chrome) -> str:
+    try:
+        tags_box = driver.find_element(By.ID, "tags-for-quiz")
+        links = tags_box.find_elements(By.TAG_NAME, "a")
+        for link in links:
+            href = link.get_attribute("href") or ""
+            if "/tags/picture" in href or "/tags/par-images" in href:
+                return "image"
+    except Exception:
+        pass
+    return "text"
+
 # Scrape quiz metadata
 def _scrape_meta(driver: webdriver.Chrome) -> dict:
     meta = {}
+
+    meta["type"] = _detect_quiz_type(driver)
+    info("parser", f"Quiz type detected: {meta['type']}")
 
     meta["title"] = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()
     meta["instructions"] = driver.find_element(By.CSS_SELECTOR, ".instructions").text.strip()
 
     score_text = driver.find_element(By.CSS_SELECTOR, "#current-score").text
-    meta["total_answers"] = int(re.findall(r"\d+", score_text)[1])
+    matches = re.findall(r"\d+", score_text)
+    if len(matches) < 2:
+        meta["type"] = "unknown"
+        raise UnsupportedQuizError(f"unable to read score format (detected type: {meta['type']})")
+    meta["total_answers"] = int(matches[1])
 
     timer_text = driver.find_element(By.CSS_SELECTOR, ".timer").text.strip()
     minutes, seconds = map(int, timer_text.split(":"))
@@ -111,7 +156,10 @@ def parse_quiz(driver: webdriver.Chrome, url: str) -> dict:
 
     _give_up(driver, wait)
 
-    answers = _scrape_answers(driver)
+    if meta["type"] == "image":
+        answers = _scrape_image_answers(driver)
+    else:
+        answers = _scrape_answers(driver)
 
     result = {**meta, "url": url, "answers": answers}
     return result
@@ -167,16 +215,30 @@ def _login_api(driver: webdriver.Chrome, config: dict, username: str, password: 
     success("parser", f"Logged in as '{screenname}'")
     return True
 
-# Parse quiz, persist to answers.json, then log in if credentials provided
-def fetch_and_cache(driver: webdriver.Chrome, config: dict, url: str, credentials: tuple[str, str] | None = None) -> dict:
+# Scrape the quiz, merge results into the cache
+def fetch_and_cache(driver: webdriver.Chrome, config: dict, url: str, credentials: tuple[str, str] | None = None, refresh: bool = False) -> dict:
     data = load_answers(config)
     slug = quiz_slug(url)
 
     info("parser", f"Fetching answers for '{slug}'...")
     quiz_data = parse_quiz(driver, url)
+
+    if quiz_data["type"] == "image":
+        existing = {} if refresh else data.get(slug, {}).get("answers", {})
+        merged = {**existing, **quiz_data["answers"]}
+        added = len(merged) - len(existing)
+        quiz_data["answers"] = merged
+        if refresh:
+            success("parser", f"Pool reset: {len(merged)} image(s) cached for '{slug}'")
+        elif added == 0:
+            success("parser", f"No new images found - pool already up to date ({len(merged)} total)")
+        else:
+            success("parser", f"Added {added} new image(s) to the pool ({len(merged)} total)")
+    else:
+        success("parser", f"Cached {len(quiz_data['answers'])} answers for '{slug}'")
+
     data[slug] = quiz_data
     save_answers(config, data)
-    success("parser", f"Cached {len(quiz_data['answers'])} answers for '{slug}'")
 
     if credentials:
         _login_api(driver, config, *credentials)

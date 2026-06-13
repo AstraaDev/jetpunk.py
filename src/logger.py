@@ -19,7 +19,8 @@ _MODULE_COLOR = {
     "driver": Fore.WHITE + Style.BRIGHT,
 }
 
-def _log(level: str, module: str, msg: str):
+# Build the formatted log line (without printing it), so it can be passed to tqdm.write
+def format_log(level: str, module: str, msg: str) -> str:
     now = datetime.now().strftime("%H:%M:%S")
     fg, _ = _LEVEL_STYLES.get(level, ("", ""))
     mod_color = _MODULE_COLOR.get(module, "")
@@ -30,7 +31,10 @@ def _log(level: str, module: str, msg: str):
     mod_part = f"{mod_color}{module:<7}{Style.RESET_ALL}"
     msg_part = f"{fg}{msg}{Style.RESET_ALL}"
 
-    print(f"  {time_part}  {level_part}  {mod_part}  {msg_part}", file=sys.stderr if level == "ERROR" else sys.stdout)
+    return f"  {time_part}  {level_part}  {mod_part}  {msg_part}"
+
+def _log(level: str, module: str, msg: str):
+    print(format_log(level, module, msg), file=sys.stderr if level == "ERROR" else sys.stdout)
 
 def info(module: str, msg: str):
     _log("INFO", module, msg)

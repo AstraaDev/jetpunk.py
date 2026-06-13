@@ -1,7 +1,17 @@
 {
   "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "delay_min": 0.03,
-  "delay_max": 0.37,
-  "pause_min": 0.2,
-  "pause_max": 1.2
+  "username": "",
+  "password": "",
+  "delays": {
+    "char_min": 0.03,
+    "char_max": 0.37,
+    "pause_min": 0.2,
+    "pause_max": 1.2
+  },
+  "advanced": {
+    "answers_file": "answers.json",
+    "selenium_overhead": 0.36,
+    "login_api": "https://www.jetpunk.com/api/login.php",
+    "login_referer": "https://www.jetpunk.com/user/login?language=english"
+  }
 }

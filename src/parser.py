@@ -116,6 +116,8 @@ def _detect_quiz_type(driver: webdriver.Chrome) -> str:
             href = link.get_attribute("href") or ""
             if "/tags/picture" in href or "/tags/par-images" in href:
                 return "image"
+            if "/tags/fill-in-the-map" in href or "/tags/carte-quiz" in href or "/tags/map" in href:
+                return "map"
     except Exception:
         pass
     return "text"
@@ -130,12 +132,17 @@ def _scrape_meta(driver: webdriver.Chrome) -> dict:
     meta["title"] = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()
     meta["instructions"] = driver.find_element(By.CSS_SELECTOR, ".instructions").text.strip()
 
-    score_text = driver.find_element(By.CSS_SELECTOR, "#current-score").text
-    matches = re.findall(r"\d+", score_text)
-    if len(matches) < 2:
-        meta["type"] = "unknown"
-        raise UnsupportedQuizError(f"unable to read score format (detected type: {meta['type']})")
-    meta["total_answers"] = int(matches[1])
+    if meta["type"] == "map":
+        remaining = int(driver.find_element(By.ID, "num-remaining").text.strip())
+        guessed   = int(driver.find_element(By.ID, "num-guessed").text.strip())
+        meta["total_answers"] = remaining + guessed
+    else:
+        score_text = driver.find_element(By.CSS_SELECTOR, "#current-score").text
+        matches = re.findall(r"\d+", score_text)
+        if len(matches) < 2:
+            meta["type"] = "unknown"
+            raise UnsupportedQuizError(f"unable to read score format (detected type: {meta['type']})")
+        meta["total_answers"] = int(matches[1])
 
     timer_text = driver.find_element(By.CSS_SELECTOR, ".timer").text.strip()
     minutes, seconds = map(int, timer_text.split(":"))
@@ -143,12 +150,33 @@ def _scrape_meta(driver: webdriver.Chrome) -> dict:
 
     return meta
 
+# Scrape the answer map for map quizzes
+def _scrape_map_answers(driver: webdriver.Chrome, wait: WebDriverWait, total: int) -> dict:
+    answers = {}
+    for _ in range(total):
+        try:
+            path = driver.find_element(By.CSS_SELECTOR, "path.map-highlight")
+            country_id = path.get_attribute("id")
+            label = driver.find_element(By.CSS_SELECTOR, "div.map-post-game-correct").text.strip()
+            if country_id and label:
+                answers[country_id] = label
+        except Exception:
+            pass
+        try:
+            btn = next(b for b in driver.find_elements(By.CSS_SELECTOR, "button.map-highlight-next") if b.is_displayed())
+            btn.click()
+        except Exception:
+            break
+    return answers
+
 # Start the quiz, give up, then scrape the answer table that JetPunk reveals after the quiz ends
 def parse_quiz(driver: webdriver.Chrome, url: str) -> dict:
     wait = WebDriverWait(driver, 15)
     driver.get(url)
-    _wait_for_cloudflare(driver)
     accept_cookies(driver, wait)
+
+    driver.refresh()
+    _wait_for_cloudflare(driver)
 
     _start_quiz(driver, wait)
 
@@ -158,6 +186,8 @@ def parse_quiz(driver: webdriver.Chrome, url: str) -> dict:
 
     if meta["type"] == "image":
         answers = _scrape_image_answers(driver)
+    elif meta["type"] == "map":
+        answers = _scrape_map_answers(driver, wait, meta["total_answers"])
     else:
         answers = _scrape_answers(driver)
 

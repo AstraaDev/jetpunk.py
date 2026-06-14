@@ -24,8 +24,10 @@ def _get_num_guessed(driver: webdriver.Chrome) -> int:
         return 0
 
 # Check if the quiz is still active (timer not expired, not 100%)
-def _quiz_still_active(driver: webdriver.Chrome) -> bool:
+def _quiz_still_active(driver: webdriver.Chrome, quiz_type: str = "text") -> bool:
     try:
+        if quiz_type == "map":
+            return int(driver.find_element(By.ID, "num-remaining").text.strip()) > 0
         box = driver.find_element(By.ID, "txt-answer-box")
         return box.is_enabled() and box.is_displayed()
     except Exception:
@@ -74,15 +76,22 @@ def _skip_current_image(driver: webdriver.Chrome) -> bool:
 #   Each answer carries an unavoidable Selenium overhead (config advanced.selenium_overhead)
 #   compute_delays subtracts this overhead first, then distributes the
 #   remaining budget between per-char sleeps (60%) and inter-answer pauses (40%)
-def compute_delays(config: dict, target_seconds: float, answers: list[str]) -> dict | None:
+def compute_delays(config: dict, target_seconds: float, answers: list[str], quiz_type: str = "text") -> dict | None:
     overhead = config["advanced"]["selenium_overhead"]
     n_answers = len(answers)
-    avg_chars = sum(len(_normalize(a)) for a in answers) / n_answers
 
     min_achievable = overhead * n_answers
     if target_seconds <= min_achievable:
         return None
 
+    # Map quizzes have no typing, distribute all budget to pauses only
+    if quiz_type == "map":
+        pause_budget = (target_seconds / n_answers) - overhead
+        pause_min = max(0.010, pause_budget * 0.5)
+        pause_max = max(pause_min, pause_budget * 1.5)
+        return {**config, "delays": {**config["delays"], "pause_min": pause_min, "pause_max": pause_max}}
+
+    avg_chars = sum(len(_normalize(a)) for a in answers) / n_answers
     time_per_answer = target_seconds / n_answers
     controllable = time_per_answer - overhead
 
@@ -134,6 +143,9 @@ def play_quiz(driver: webdriver.Chrome, url: str, answers: list[str], config: di
 
     _start_quiz(driver, wait)
     success("player", "Quiz started")
+
+    if quiz_type == "map":
+        return _play_map_quiz(driver, answers, pause_min, pause_max)
 
     input_box = _find_input(driver, wait)
     total = len(answers)
@@ -200,6 +212,61 @@ def _play_text_quiz(driver: webdriver.Chrome, wait: WebDriverWait, input_box, an
 
     success("player", f"Done - {guessed}/{total} answers validated")
 
+    return True
+
+# Play a map-style quiz
+def _play_map_quiz(driver: webdriver.Chrome, answers: dict, pause_min: float, pause_max: float) -> bool:
+    total = len(answers)
+    guessed = 0
+    stop_event = threading.Event()
+    watcher = threading.Thread(target=_watch_for_enter, args=(stop_event,), daemon=True)
+    watcher.start()
+
+    with tqdm(total=total, unit="ans", dynamic_ncols=True, leave=True) as bar:
+        for _ in range(total):
+            if stop_event.is_set():
+                bar.leave = False
+                break
+            if not _quiz_still_active(driver, quiz_type="map"):
+                guessed = _finish(bar, guessed, total)
+                break
+            try:
+                # Find the highlighted country on the SVG map
+                path = driver.find_element(By.CSS_SELECTOR, "path.map-highlight")
+                country_id = path.get_attribute("id")
+
+                # Look up the label from cache
+                label = answers.get(country_id)
+                if label is None:
+                    bar.write(format_log("WARN", "player", f"No cached answer for country id '{country_id}', skipping"))
+                    driver.find_element(By.CSS_SELECTOR, "button.map-highlight-next").click()
+                    bar.update(1)
+                    time.sleep(random.uniform(pause_min, pause_max))
+                    continue
+
+                # Find the matching answer div by label text and click it
+                answer_div = next((d for d in driver.find_elements(By.CSS_SELECTOR, "div.map-answer") if d.text.strip().replace("\n", " ") == label), None)
+                if answer_div is None:
+                    bar.write(format_log("WARN", "player", f"Answer div not found for '{label}', skipping"))
+                    driver.find_element(By.CSS_SELECTOR, "button.map-highlight-next").click()
+                    bar.update(1)
+                    time.sleep(random.uniform(pause_min, pause_max))
+                    continue
+
+                answer_div.click()
+                guessed += 1
+                bar.update(1)
+                time.sleep(random.uniform(pause_min, pause_max))
+            except (ElementNotInteractableException, StaleElementReferenceException):
+                guessed = _finish(bar, guessed, total)
+                break
+            except Exception as e:
+                bar.write(format_log("WARN", "player", f"Warning while solving map quiz: {e}"))
+                break
+        else:
+            guessed = _finish(bar, guessed, total)
+
+    success("player", f"Done - {guessed}/{total} answers validated")
     return True
 
 # Play an image-style quiz

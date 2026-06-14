@@ -106,14 +106,13 @@ def main():
     driver = create_driver(config)
 
     try:
-        if quiz_type == "image":
-            # For image quizzes answers is a {image_src: answer} map
-            # Order is determined live by the page, so shuffle doesn't apply here
+        if quiz_type in ("image", "map"):
+            # For image/map quizzes answers is a dict
             answers = quiz_data["answers"]
             n_answers = len(answers)
             info("main", f"Playing '{quiz_data.get('title', slug)}' with {n_answers} cached answers")
 
-            if args.time:
+            if args.time and quiz_type == "image":
                 effective_config = compute_delays(config, args.time, list(answers.values()))
                 if effective_config is None:
                     overhead = config["advanced"]["selenium_overhead"]
@@ -122,9 +121,17 @@ def main():
                     sys.exit(1)
                 d = effective_config["delays"]
                 note("main", f"--time {args.time}s: delays recalculated (char={d['char_min']:.3f}-{d['char_max']:.3f}s, pause={d['pause_min']:.3f}-{d['pause_max']:.3f}s)")
+            elif args.time and quiz_type == "map":
+                effective_config = compute_delays(config, args.time, list(answers.values()), quiz_type="map")
+                if effective_config is None:
+                    overhead = config["advanced"]["selenium_overhead"]
+                    min_time = overhead * n_answers
+                    error("main", f"--time {args.time}s is too short: minimum achievable time for {n_answers} answers is ~{min_time:.0f}s")
+                    sys.exit(1)
+                d = effective_config["delays"]
+                note("main", f"--time {args.time}s: delays recalculated (pause={d['pause_min']:.3f}-{d['pause_max']:.3f}s)")
             else:
                 effective_config = config
-
         else:
             answers = list(quiz_data["answers"])
             if args.shuffle:
@@ -148,13 +155,17 @@ def main():
 
         note("main", "Press Enter at any time to stop gracefully")
 
-        play_quiz(driver, url, answers, effective_config, credentials, quiz_type)
+        completed = play_quiz(driver, url, answers, effective_config, credentials, quiz_type)
 
     except KeyboardInterrupt:
+        completed = False
         warning("main", "Interrupted - stopping...")
 
     finally:
-        detach_driver(driver)
+        if completed:
+            detach_driver(driver)
+        else:
+            quit_driver(driver)
 
 if __name__ == "__main__":
     main()

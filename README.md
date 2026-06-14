@@ -81,9 +81,9 @@ Answers must be scraped and cached before playing. For standard quizzes a single
 time (e.g. flag quizzes), run `--scrape` several times to accumulate the full pool.
 
 ```
---scrape          Fetch answers → merge into cache → exit
---scrape --refresh  Reset cache, fetch fresh answers → exit
---url             Play using the cached answers (error if none found)
+--scrape            Fetch answers -> merge into cache -> exit
+--scrape --refresh  Reset cache, fetch fresh answers -> exit
+--url               Play using the cached answers (error if none found)
 ```
 
 ---

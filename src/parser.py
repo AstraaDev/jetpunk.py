@@ -116,6 +116,8 @@ def _detect_quiz_type(driver: webdriver.Chrome) -> str:
             href = link.get_attribute("href") or ""
             if "/tags/picture" in href or "/tags/par-images" in href:
                 return "image"
+            if "/tags/sudden-death" in href or "/tags/mort-subite" in href:
+                return "sudden_death"
             if "/tags/fill-in-the-map" in href or "/tags/carte-quiz" in href or "/tags/map" in href:
                 return "map"
     except Exception:
@@ -132,7 +134,7 @@ def _scrape_meta(driver: webdriver.Chrome) -> dict:
     meta["title"] = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()
     meta["instructions"] = driver.find_element(By.CSS_SELECTOR, ".instructions").text.strip()
 
-    if meta["type"] == "map":
+    if meta["type"] in ("map", "sudden_death"):
         remaining = int(driver.find_element(By.ID, "num-remaining").text.strip())
         guessed   = int(driver.find_element(By.ID, "num-guessed").text.strip())
         meta["total_answers"] = remaining + guessed
@@ -169,6 +171,11 @@ def _scrape_map_answers(driver: webdriver.Chrome, wait: WebDriverWait, total: in
             break
     return answers
 
+# Scrape the answer grid for sudden death quizzes
+def _scrape_sudden_death_answers(driver: webdriver.Chrome) -> list[str]:
+    items = driver.find_elements(By.CSS_SELECTOR, "div.grid-item.green-outline")
+    return [item.get_attribute("data-id") for item in items if item.get_attribute("data-id")]
+
 # Start the quiz, give up, then scrape the answer table that JetPunk reveals after the quiz ends
 def parse_quiz(driver: webdriver.Chrome, url: str) -> dict:
     wait = WebDriverWait(driver, 15)
@@ -188,6 +195,8 @@ def parse_quiz(driver: webdriver.Chrome, url: str) -> dict:
         answers = _scrape_image_answers(driver)
     elif meta["type"] == "map":
         answers = _scrape_map_answers(driver, wait, meta["total_answers"])
+    elif meta["type"] == "sudden_death":
+        answers = _scrape_sudden_death_answers(driver)
     else:
         answers = _scrape_answers(driver)
 

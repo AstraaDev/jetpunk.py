@@ -106,21 +106,20 @@ def main():
     driver = create_driver(config)
 
     try:
-        if quiz_type in ("image", "map"):
-            # For image/map quizzes answers is a dict
+        if quiz_type in ("image", "map", "sudden_death"):
             answers = quiz_data["answers"]
             n_answers = len(answers)
             info("main", f"Playing '{quiz_data.get('title', slug)}' with {n_answers} cached answers")
 
-            if args.time and quiz_type == "image":
-                effective_config = compute_delays(config, args.time, list(answers.values()))
+            if args.time and quiz_type in ("image", "sudden_death"):
+                effective_config = compute_delays(config, args.time, list(answers.values()), quiz_type="sudden_death")
                 if effective_config is None:
                     overhead = config["advanced"]["selenium_overhead"]
                     min_time = overhead * n_answers
                     error("main", f"--time {args.time}s is too short: minimum achievable time for {n_answers} answers is ~{min_time:.0f}s")
                     sys.exit(1)
                 d = effective_config["delays"]
-                note("main", f"--time {args.time}s: delays recalculated (char={d['char_min']:.3f}-{d['char_max']:.3f}s, pause={d['pause_min']:.3f}-{d['pause_max']:.3f}s)")
+                note("main", f"--time {args.time}s: delays recalculated (pause={d['pause_min']:.3f}-{d['pause_max']:.3f}s)")
             elif args.time and quiz_type == "map":
                 effective_config = compute_delays(config, args.time, list(answers.values()), quiz_type="map")
                 if effective_config is None:

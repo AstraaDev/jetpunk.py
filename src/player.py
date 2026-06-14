@@ -28,6 +28,8 @@ def _quiz_still_active(driver: webdriver.Chrome, quiz_type: str = "text") -> boo
     try:
         if quiz_type == "map":
             return int(driver.find_element(By.ID, "num-remaining").text.strip()) > 0
+        if quiz_type == "sudden_death":
+            return int(driver.find_element(By.ID, "num-remaining").text.strip()) > 0
         box = driver.find_element(By.ID, "txt-answer-box")
         return box.is_enabled() and box.is_displayed()
     except Exception:
@@ -141,11 +143,15 @@ def play_quiz(driver: webdriver.Chrome, url: str, answers: list[str], config: di
         if not already_logged_in:
             _login_api(driver, config, *credentials)
 
+    accept_cookies(driver, wait)
     _start_quiz(driver, wait)
     success("player", "Quiz started")
 
     if quiz_type == "map":
         return _play_map_quiz(driver, answers, pause_min, pause_max)
+
+    if quiz_type == "sudden_death":
+        return _play_sudden_death_quiz(driver, answers, pause_min, pause_max)
 
     input_box = _find_input(driver, wait)
     total = len(answers)
@@ -330,6 +336,46 @@ def _play_image_quiz(driver: webdriver.Chrome, input_box, answers: dict, char_mi
 
     success("player", f"Done - {guessed}/{total} answers validated")
 
+    return True
+
+# Play a sudden death quiz
+def _play_sudden_death_quiz(driver: webdriver.Chrome, answers: list[str], pause_min: float, pause_max: float) -> bool:
+    correct_ids = set(answers)
+    total = len(correct_ids)
+    guessed = 0
+    stop_event = threading.Event()
+    watcher = threading.Thread(target=_watch_for_enter, args=(stop_event,), daemon=True)
+    watcher.start()
+
+    with tqdm(total=total, unit="ans", dynamic_ncols=True, leave=True) as bar:
+        items = driver.find_elements(By.CSS_SELECTOR, "div.grid-item.active")
+        for item in items:
+            if stop_event.is_set():
+                bar.leave = False
+                break
+            if not _quiz_still_active(driver, quiz_type="sudden_death"):
+                guessed = _finish(bar, guessed, total)
+                break
+            try:
+                data_id = item.get_attribute("data-id")
+                if data_id not in correct_ids:
+                    continue
+                item.click()
+                guessed += 1
+                bar.update(1)
+                time.sleep(random.uniform(pause_min, pause_max))
+
+            except (ElementNotInteractableException, StaleElementReferenceException):
+                guessed = _finish(bar, guessed, total)
+                break
+            except Exception as e:
+                bar.write(format_log("WARN", "player", f"Warning while solving sudden death quiz: {e}"))
+                break
+
+        else:
+            guessed = _finish(bar, guessed, total)
+
+    success("player", f"Done - {guessed}/{total} answers validated")
     return True
 
 # Typing simulation with random delays, interruptible via stop_event

@@ -85,7 +85,8 @@ def main():
     # --scrape mode: fetch answers, merge into cache, then exit
     if args.scrape:
         info("main", f"Scraping '{slug}'...")
-        driver = create_driver(config)
+        # driver = create_driver(config, headless=True)
+        driver = create_driver(config, headless=False) # cloudflare blocks headless mode, so we use a visible browser for now
         try:
             fetch_and_cache(driver, config, url, credentials, args.refresh)
         except UnsupportedQuizError:
@@ -103,7 +104,7 @@ def main():
         sys.exit(1)
 
     quiz_type = quiz_data.get("type", "text")
-    driver = create_driver(config)
+    driver = create_driver(config, headless=False)
 
     try:
         if quiz_type in ("image", "map", "sudden_death"):
